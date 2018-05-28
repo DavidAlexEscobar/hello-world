@@ -1,0 +1,665 @@
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                      CODE DESCRIPTION                                           ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///FOOTBALL PLAYER ROBOT                                                                            ///
+///AUTHORS: ALEX COTRINO & DAVID PASCUALI                                                           ///
+///The function of this code is to manually control a soccer player car, which in turn will print   ///
+///on an LCD screen information important for its operation, such as the percentage of the          ///
+///remaining battery charge when it is very low, the system temperature, and the speed of the       ///
+///motors. In addition, the communication will be made through bluetooth; in this way the speed and /// 
+///trajectory of the robot will be controlled, considering that when the limits of the playing      ///
+///field are detected by a sensor, the robot will automatically take the necessary direction to     ///
+///stay within the field.                                                                           ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                     INITIAL STATEMENTS                                          ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#INCLUDE <16F877A.h>//PIC´s library																
+#device ADC=10//Able the analog-digital conversion									
+#USE DELAY(CLOCK=4000000)
+#FUSES XT,NOWDT,NOPROTECT,NOLVP,PUT,BROWNOUT,NOLVP//the fuses that will be used are declared
+#DEFINE lcd_rs_pin pin_d3
+#DEFINE lcd_enable_pin pin_d2
+#DEFINE lcd_rw_pin pin_a4//Pins to able the LCD are defined#define lcd_rs_pin pin_d3
+#INCLUDE <LCD.C> // We will need to use a LCD	
+#use rs232(baud=9600,parity=N,xmit=PIN_C6,rcv=PIN_C7,bits=8,stream=PORT1)//Pins to use the bluetooth are defined											
+#USE fast_io(d)//THE PORTS ARE MANUALLY CONFIGURED
+#USE fast_io(b)//THE PORTS ARE MANUALLY CONFIGURED
+#USE fast_io(c)//THE PORTS ARE MANUALLY CONFIGURED
+#DEFINE buzzer pin_c0//Define the pin for the buzzer
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                       VARIABLES DECLARATION                                     ///                              
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+char DATA; //Characters from the bluetooth
+float battery, percent; //Variables to battery and its percentage
+float temperature1, Mtemperature1, temperature2, Mtemperature2; //Variables for the reading of temperature
+int timer2=249, poscaler=1;
+int BUTTON1, BUTTON2;															
+int16 DUTY=0; //Variable for PWM		
+float VPROM1, VPROM2, VPROM3, VPROM4;	
+int16 MAXFR,MAXFL,MAXBR,MAXBL,MEDIAFR=900,MEDIAFL=900; //VARIABLES FOR CALIBRATION
+int16 MINFR,MINFL,MINBR,MINBL,MEDIABR=900,MEDIABL=900; //VARIABLES FOR CALIBRATION
+int16 FrontLeft, BackLeft, FrontRight, BackRight; //VARIABLES OF LINE SENSORS
+int16 COUNTER=0; //Variable to print on the LCD
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                       INITIALIZATION PORTS FUNCTION                             ///        
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void StartPorts(){									
+set_tris_d(0b11); //Define the pins of the PORT D as inputs and outputs									
+set_tris_b(0b00000000); //Define the whole PORT B as outputs		
+set_tris_c(0b10000000); //Define the pins of the PORT C as inputs and outputs
+#DEFINE LED1 pin_C3	//Define the pin for the LED		
+return; //Return to the main program
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        PUT ON BLACK FUNCTION                                    ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void ReadButtons(){											
+if ((input(pin_D0)==0)){//Ask if the pin is in low state								
+BUTTON1=1;//If so, button1 is in high state												
+}
+else if((input(pin_D0)==1)){//Ask if the pin is in high state								
+BUTTON1=0;//If so, button1 is in low state 												
+}
+if ((input(pin_D1)==0)){//Ask if the pin is in low state									
+BUTTON2=1;//If so, button2 is in high state												
+}
+else if((input(pin_D1)==1)){//Ask if the pin is in high state								
+BUTTON2=0;//If so, button2 is in low state												
+}
+return;//Return to the main program													
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        START BLUETOOTH FUNCTION                                 ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void ReadBluetooth(){															
+     DATA = getc(PORT1);// The char variable Data acquires the value of the character of the serial communication with the bluetooth															
+     output_high(LED1);// LED turns on to prove that the serial communication works correctly
+     lcd_gotoxy(15,2);// Go to the specified space on the LCD 																
+     printf(lcd_putc,"%c",DATA);// Print the character on the LCD														
+ return;// Return to the function which called																		
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        READING FIRST SENSOR FUNCTION                            ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void ReadSensor1(int frontleft){
+float reading1; //Create the variable reading1 to the voltage of frontleft
+set_adc_channel(2); //Go to the second analog channel to read
+reading1 = read_adc(); //Keep the value in the variable
+if (reading1 >= VPROM1){ //Ask if the value is smaller than the medium
+void TurnRight(); //If so, call the function to don´t get out from the lines
+}
+return; //Return to the function which called
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        READING SECOND SENSOR FUNCTION                           ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void ReadSensor2(int backleft){
+float reading2; //Create the variable reading2 to the voltage of backleft
+set_adc_channel(6); //Go to the sixth analog channel to read
+reading2 = read_adc(); //Keep the value in the variable
+if (reading2 >= VPROM2){ //Ask if the value is smaller than the medium
+void TurnRight(); //If so, call the function to don´t get out from the lines
+}
+return; //Return to the function which called
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        READING THIRD SENSOR FUNCTION                            ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void ReadSensor3(int frontright){
+float reading3; //Create the variable reading3 to the voltage of frontright
+set_adc_channel(1); //Go to the first analog channel to read
+reading3 = read_adc(); //Keep the value in the variable
+if (reading3 >= VPROM3){ //Ask if the value is smaller than the medium
+void TurnLeft(); //If so, call the function to don´t get out from the lines
+}
+return; //Return to the function which called
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        READING FOURTH SENSOR FUNCTION                           ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void ReadSensor4(int backright){
+float reading4; //Create the variable reading4 to the voltage of backright
+set_adc_channel(3); //Go to the third analog channel to read
+reading4 = read_adc(); //Keep the value in the variable
+if (reading4 >= VPROM4){ //Ask if the value is smaller than the medium
+void TurnLeft(); //If so, call the function to don´t get out from the lines
+}
+return; //Return to the function which called
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                       READ LINE                                  ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void ReadLine(){//FUNCTION READLINE
+set_adc_channel(1);//ACTIVE THE ADC PORTA,1
+FrontRight=read_adc();//I SAVE THE CONVERSION IN FrontRight
+set_adc_channel(2);//ACTIVE THE ADC PORTA,2
+FrontLeft=read_adc();//I SAVE THE CONVERSION IN FrontLeft
+set_adc_channel(3);//ACTIVE THE ADC PORTA,3
+BackRight=read_adc();//I SAVE THE CONVERSION IN BackRight
+set_adc_channel(6);//ACTIVE THE ADC PORTA,6
+BackLeft=read_adc();//I SAVE THE CONVERSION IN BackLeft
+return;//RETURN MAIN
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        BATTERY FUNCTION                                         ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void ReadBattery(){
+  set_adc_channel(0);//Go to channel 0 to read the voltage of the battery
+  battery = read_adc();//Keep the value in the variable "battery"
+  percent = (battery/7.4)*100;//Get the percentage of the initial voltage of the battery: 7.4 v
+ return;//Return to the main program
+}
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        TEMPERATURE SENSOR FUNCTION                              ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void ReadTemperature (){													
+set_adc_channel(4);//Go to	the forth analog channel														
+Mtemperature1=read_adc();//Keep the value in the variable															
+set_adc_channel(5);//Go to	the fifth analog channel														
+Mtemperature2=read_adc();//Keep the value in the variable											
+temperature1 = Mtemperature1*(0.48875);//Conversion to celsius degrees										
+temperature2 = Mtemperature2*(0.48875);//Conversion to celsius degrees										
+ return;//Return to the main program																			
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        PWM FUNCTION                                             ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void Modulation(){					
+set_pwm1_duty(DUTY);// The first TimeHigh is variable
+set_pwm2_duty(DUTY);// The second TimeHigh is variable
+return;//Return to the function which called
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        PUT ON WAIT FUNCTION                                    ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+void Wait(){
+if(((input(pin_D0))==0)){//FUNCTION WAIT()
+	lcd_putc("\f");//CLEAN SCREEN
+	lcd_putc("     WAIT      \n");//PRINT ON SCREEN
+	lcd_putc(".................");
+	DUTY=0;//WORK CYCLE IS ZERO, ENGINES STOPPED
+	Modulation();//GO TO THE FUNCTION PWM()
+	while((input(pin_D1))==1){//IT STAYS WHILE THE BUTTON2 IS NOT PRESSED
+	}
+}
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        ADVANCE FORWARD FUNCTION                                 ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void GoForward(){
+output_high(pin_b0);//Put the pin in high state
+output_low(pin_b1);//Put the pin in low state
+output_high(pin_b2);//Put the pin in low state															
+output_low(pin_b3);//Put the pin in low state
+output_high(pin_b4);
+output_low(pin_b5);
+output_high(pin_b6);
+output_low(pin_b7);
+return;//Return to the function which called
+} 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        BACKWARD MOTION FUNCTION                                 ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void GoBack(){
+output_low(pin_b0);//Put the pin in high state
+output_high(pin_b1);//Put the pin in low state
+output_low(pin_b2);//Put the pin in low state															
+output_high(pin_b3);//Put the pin in low state
+output_low(pin_b4);
+output_high(pin_b5);
+output_low(pin_b6);
+output_high(pin_b7);
+return;//Return to the function which called
+} 
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        TURN LEFT FUNCTION                                       ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void TurnLeft(){
+output_low(pin_b0);//Put the pin in high state
+output_high(pin_b1);//Put the pin in low state
+output_low(pin_b2);//Put the pin in low state															
+output_high(pin_b3);//Put the pin in low state
+output_high(pin_b4);
+output_low(pin_b5);
+output_high(pin_b6);
+output_low(pin_b7);
+return;//Return to the function which called
+} 
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                       TURN RIGHT FUNCTION                                       ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void TurnRight(){
+output_high(pin_b0);//Put the pin in high state
+output_low(pin_b1);//Put the pin in low state
+output_high(pin_b2);//Put the pin in low state															
+output_low(pin_b3);//Put the pin in low state
+output_low(pin_b4);
+output_high(pin_b5);
+output_low(pin_b6);
+output_high(pin_b7);
+return;//Return to the function which called
+} 
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                       MOVE                                     ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void MoveWheels(){//FUNCTION MOVE
+WAIT();//GO TO THE FUNCTION WAIT()
+if((FrontRight<MEDIAFR) && (FrontLeft<MEDIAFL) && (BackRight<MEDIABR) && (BackLeft<MEDIABL)){	//IF THE READING OF THE SENSORS IS A MINIMUM	
+switch(DATA){//DEPENDING ON THE VARIABLE DATA RECEIVED FROM THE BLUETOOTH
+case 'M'://THE CAR STOPS
+output_low(pin_b0);//THE DEPARTURES ARE DEFINED AS HIGH OR LOW
+output_low(pin_b1);//IN THE PORTB TO MAKE THE CART STOPS
+output_low(pin_b2);
+output_low(pin_b3);
+output_low(pin_b4);
+output_low(pin_b5);
+output_low(pin_b6);
+output_low(pin_b7);
+break;
+case 'A':																	
+GoForward();//CASES TO ADVANCE TO DIFFERENT SPEEDS
+DUTY=500;
+Modulation();																	
+break;										
+case 'D':
+GoForward();																
+DUTY=700;
+Modulation();																	
+break;
+case 'G':
+GoForward();																
+DUTY=900;
+Modulation();																	
+break;
+case 'Q'://CASES TO RETURN TO DIFFERENT SPEEDS
+GoBack();																	
+DUTY=500;
+Modulation();	
+break;									
+case 'E':
+GoBack();
+DUTY=700;
+Modulation();	
+break;
+case 'T':
+GoBack();
+DUTY=900;
+Modulation();	
+break;
+case 'Z'://CASES TO ROTATE RIGHT AT DIFFERENT SPEEDS
+void TurnLeft();
+DUTY=500;
+Modulation();
+break;										
+case 'C':
+void TurnLeft();
+DUTY=700;
+Modulation();
+break;
+case 'B':
+void TurnLeft();
+DUTY=900;
+Modulation();	
+break;
+case 'P'://CASES TO ROTATE LEFT AT DIFFERENT SPEEDS
+void TurnLeft();
+DUTY=500;
+Modulation();	
+break;										
+case 'I':
+void TurnRight();
+DUTY=700;
+Modulation();	
+break;
+case 'Y':
+void TurnRight();
+DUTY=900;
+Modulation();	
+break;
+case 'L':
+output_low(pin_b0);
+output_high(pin_b1);
+output_low(pin_b2);
+output_high(pin_b3);
+output_low(pin_b4);
+output_low(pin_b5);
+output_low(pin_b6);
+output_low(pin_b7);
+DUTY=500;
+Modulation();	
+break;
+case 'K':
+output_low(pin_b0);
+output_low(pin_b1);
+output_low(pin_b2);
+output_low(pin_b3);
+output_low(pin_b4);
+output_high(pin_b5);
+output_low(pin_b6);
+output_high(pin_b7);
+DUTY=500;
+Modulation();	
+break;
+case 'J':
+output_high(pin_b0);
+output_low(pin_b1);
+output_high(pin_b2);
+output_low(pin_b3);
+output_low(pin_b4);
+output_low(pin_b5);
+output_low(pin_b6);
+output_low(pin_b7);
+DUTY=500;
+Modulation();	
+break;
+case 'H':
+output_low(pin_b0);
+output_low(pin_b1);
+output_low(pin_b2);
+output_low(pin_b3);
+output_high(pin_b4);
+output_low(pin_b5);
+output_high(pin_b6);
+output_low(pin_b7);
+DUTY=500;
+Modulation();	
+break;
+default:
+DUTY=0;
+Modulation();
+}
+}else if((FrontRight<MEDIAFR) && (FrontLeft>=MEDIAFL) && (BackRight<MEDIABR) && (BackLeft<MEDIABL)){
+GoBack();
+DUTY=500;
+Modulation();
+delay_ms(500);
+DUTY=0;
+}else if((FrontRight>=MEDIAFR) && (FrontLeft<MEDIAFL) && (BackRight<MEDIABR) && (BackLeft<MEDIABL)){
+GoBack();
+DUTY=500;
+Modulation();
+delay_ms(500);
+DUTY=0;
+}else if((FrontRight>=MEDIAFR) && (FrontLeft>=MEDIAFL) && (BackRight<MEDIABR) && (BackLeft<MEDIABL)){
+GoBack();
+DUTY=500;
+Modulation();
+delay_ms(500);
+DUTY=0;
+}
+output_low(LED1);
+return;//RETURN MAIN
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        FUNCTION                                    ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void Printing(){//FUNCTION SYSTEM
+if(COUNTER<30){//IF COUNTER IS LESS THAN 63
+lcd_gotoxy(1,1);//CURSOR OF THE LCD LOCATED IN (1,1)										
+lcd_putc("  % PERCENTAGE  ");//PRINT ON SCREEN
+lcd_gotoxy(5,2);//CURSOR OF THE LCD LOCATED IN (1,2)
+printf(lcd_putc,"%02.2f",percent);//PLACE THE BPERCENTAGE ON THE LCD
+lcd_gotoxy(11,2);//CURSOR OF THE LCD LOCATED IN (11,2)
+lcd_putc("%");																		
+COUNTER++;//INCREASE IN 1 COUNTER
+}else if(COUNTER>=30 && COUNTER<60){//ELSE IF 63<=COUNTER<126
+lcd_gotoxy(1,1);//CURSOR OF THE LCD LOCATED IN (1,1)										
+lcd_putc(" TEMPERATURA 1  ");//PRINT ON SCREEN
+lcd_gotoxy(5,2);//CURSOR OF THE LCD LOCATED IN (1,2)
+printf(lcd_putc,"%02.1f",temperature1);//PLACE THE TEMPERATURE1 ON THE LCD
+lcd_gotoxy(11,2);//CURSOR OF THE LCD LOCATED IN (6,1)											
+lcd_putc("oC  ");
+COUNTER++;//INCREASE IN 1 COUNTER
+}else if(COUNTER>=60 && COUNTER<90){//ELSE IF 63<=COUNTER<126
+lcd_gotoxy(1,1);//CURSOR OF THE LCD LOCATED IN (1,1)										
+lcd_putc(" TEMPERATURA 2  ");//PRINT ON SCREEN
+lcd_gotoxy(5,2);//CURSOR OF THE LCD LOCATED IN (10,2)
+printf(lcd_putc,"%02.1f",temperature2);//PLACE THE TEMPERATURE1 ON THE LCD
+lcd_gotoxy(11,2);//CURSOR OF THE LCD LOCATED IN (15,2)										
+lcd_putc("oC");
+COUNTER++;//INCREASE IN 1 COUNTER
+}else if(COUNTER==90){//ELSE IF COUNTER = 126
+lcd_putc("\f");//CLEAN SCREEN
+COUNTER=0;//COUNTER = 0
+} 
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        FUNCTION  CALIBRACION                                  ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void Calibration(){//FUNCTION CALIBRATION																					
+delay_ms(500);//WAIT 500 mS (DEBOUNCING)
+MAXFR=0;//MAXFR IS INITIALIZED IN 0
+MINFR=1023;//MINFR IS INITIALIZED IN 1023
+while(TRUE){//INFINITE CYCLE
+lcd_putc("   CALIBRATE    \n");//CALIBRATION OPTIONS
+lcd_putc("   MIN      MAX   ");	
+if ((input(pin_D1)==0)){//IF BUTTON 2 IS PRESSED
+set_adc_channel(1);//ACTIVE THE ADC PORTA,1
+MAXFR=read_adc();//I SAVE THE CONVERSION IN MAXFR
+delay_us (20);//WAIT 20 uS
+set_adc_channel(2);//ACTIVE THE ADC PORTA,2
+MAXFL=read_adc();//I SAVE THE CONVERSION IN MAXFL
+delay_us (20);//WAIT 20 uS
+set_adc_channel(3);//ACTIVE THE ADC PORTA,3
+MAXBR=read_adc();//I SAVE THE CONVERSION IN MAXBR
+delay_us (20);//WAIT 20 uS
+set_adc_channel(6);//ACTIVE THE ADC PORTA,6
+MAXBL=read_adc();//I SAVE THE CONVERSION IN MAXBL
+delay_us (20);//WAIT 20 uS
+lcd_putc("\f");//CLEAN SCREEN
+lcd_putc("FR:");//I PRINT ON SCREEN THE MAXIMUM VALUES OF 
+printf(lcd_putc,"%ld",MAXFR);//THE LINE SENSORS
+lcd_gotoxy(10,1);														
+lcd_putc("FL:");														
+printf(lcd_putc,"%ld",MAXFL);										
+lcd_gotoxy(1,2);														
+lcd_putc("BR:");														
+printf(lcd_putc,"%ld",MAXBR);										
+lcd_gotoxy(10,2);														
+lcd_putc("BL:");														
+printf(lcd_putc,"%ld",MAXBL);										
+delay_ms (2000);//WAIT 2000 mS TO VISUALIZE
+lcd_putc("\f");//CLEAN SCREEN
+}
+else if((input(pin_D0)==0)){//ELSE IF BUTTON 1 IS PRESSED
+set_adc_channel(1);//ACTIVE THE ADC PORTA,1
+MINFR=read_adc();//I SAVE THE CONVERSION IN MAXFR
+delay_us (20);//WAIT 20 uS
+set_adc_channel(2);//ACTIVE THE ADC PORTA,2
+MINFL=read_adc();//I SAVE THE CONVERSION IN MAXFL
+delay_us (20);//WAIT 20 uS
+set_adc_channel(3);//ACTIVE THE ADC PORTA,3
+MINBR=read_adc();//I SAVE THE CONVERSION IN MAXBR
+delay_us (20);//WAIT 20 uS
+set_adc_channel(6);//ACTIVE THE ADC PORTA,6
+MINBL=read_adc();//I SAVE THE CONVERSION IN MAXBL
+delay_us (20);//WAIT 20 uS
+lcd_putc("\f");//CLEAN SCREEN
+lcd_putc("FR:");//I PRINT ON SCREEN THE MINIMUM VALUES OF
+printf(lcd_putc,"%ld",MINFR);//THE LINE SENSORS
+lcd_gotoxy(10,1);
+lcd_putc("FL:");
+printf(lcd_putc,"%ld",MINFL);
+lcd_gotoxy(1,2);
+lcd_putc("BR:");
+printf(lcd_putc,"%ld",MINBR);
+lcd_gotoxy(10,2);
+lcd_putc("BL:");
+printf(lcd_putc,"%ld",MINBL);
+delay_ms (2000);//WAIT 2000 mS TO VISUALIZE
+lcd_putc("\f");//CLEAN SCREEN
+}
+else if((MAXFR>0)&&(MINFR<1023)){//ELSE IF THE MINFR AND THE MAXFR ARE ALREADY CALCULATED
+lcd_putc("\f");//CLEAN SCREEN
+lcd_putc("   AVERAGE     \n");
+lcd_putc("    LEAVE        ");
+while(TRUE){
+if((input(pin_D1)==0)){//IF BUTTON 3 IS PRESSED
+return;//RETURN INIROBOT()
+}
+else if((input(pin_D0)==0)){//ELSE IF BUTTON 2 IS PRESSED
+lcd_putc("\f");//CLEAN SCREEN
+MEDIAFR=((MAXFR+MINFR)/2);//THE AVERAGE IS CALCULATED FOR ALL SENSORS
+lcd_putc("MFR:");//I PRINT ON SCREEN THE PROMEDIOS OF 
+printf(lcd_putc,"%ld",MEDIAFR);//THE LINE SENSORS
+lcd_gotoxy(10,1);
+lcd_putc("MFL:");
+MEDIAFL=((MAXFL+MINFL)/2);
+printf(lcd_putc,"%ld",MEDIAFL);
+lcd_gotoxy(1,2);
+lcd_putc("MBR:");
+MEDIABR=((MAXBR+MINBR)/2);
+printf(lcd_putc,"%ld",MEDIABR);
+lcd_gotoxy(10,2);
+lcd_putc("MBL:");
+MEDIABL=((MAXBL+MINBL)/2);
+printf(lcd_putc,"%ld",MEDIABL);
+delay_ms (2000);//WAIT 2000 mS TO VISUALIZE
+return;//RETURN INIROBOT()
+}
+}
+}
+}
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        KICK-OFF FUNCTION                                        ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+void StartRobot(){																	
+lcd_init();// Initialize functioning of the LCD																		
+output_low(LED1);// LED must be turned off when COPA starts																
+setup_adc_ports (AN0_AN1_AN2_AN3_AN4_AN5);//Select the ports for the analog-digital conversion										
+setup_adc (adc_clock_internal);//Configuration of the clock for the conversion												
+setup_timer_2(t2_div_by_4,timer2,poscaler);										
+setup_ccp1(ccp_pwm);															
+setup_ccp2(ccp_pwm);															
+Modulation();// Call the function for PWM of the motors																	
+lcd_putc("\f");// Clean the whole LCD																	
+lcd_putc("    PAC0   \n");// Print on the LCD the robot's name and jump to the second line													
+lcd_putc("SUPER CHAMPION");// Print that our robot is a champion
+delay_ms (3000);// Wait for 3 seconds
+lcd_putc("\f");// Clean the whole LCD	
+lcd_putc("ELECTRONICA\n");// Print the name of the subject which we've made the robot to
+lcd_putc("DIGITALES II");
+delay_ms (2000);// Wait for 3 seconds													
+lcd_putc("\f");// Clean the whole LCD															
+while(TRUE){														
+lcd_putc("  CALIBRATION \n");// When COPA is activated, it's prepared for calibration									
+lcd_putc("    NO    YES   ");
+delay_ms(250);														
+if ((input(pin_D0)==0)){ //Ask if the button of the pin is pressed												
+lcd_putc("\f");//If so, reset the whole LCD
+return;																														
+}
+else if((input(pin_D1)==0)){//Ask if the button of the pin is pressed											
+calibration();//If so, call the function to calibrate														
+lcd_putc("\f");//Clean the whole LCD after calibrate														
+}
+}
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                                 ///
+///                                        MAIN PROGRAM                                             ///                                ///
+///                                                                                                 ///
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void main(){																		
+StartPorts(); //Call the function SetPorts()																			
+StartRobot(); //Call the function Start()																			
+delay_ms(500); //Wait for a half second																	
+while(TRUE){																		
+ReadButtons();	//Call the function ReadButtons()																
+ReadBluetooth(); //Call the function ReadBluetooth()	 																
+ReadLine(); //Call the function ReadLine()																		
+ReadBattery();	//Call the function ReadBattery()																
+ReadTemperature();	//Call the function ReadTemperature()																																	//GO THE FUNCTION MOVE()
+MoveWheels();
+Printing();															
+}
